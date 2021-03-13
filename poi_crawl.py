@@ -7,14 +7,16 @@ import logging
 import json
 from bs4 import BeautifulSoup
 
+
 URL = 'https://m.ctrip.com/restapi/soa2/13342/json/getSightRecreationList'
 DetailURL = 'https://m.ctrip.com/restapi/soa2/18254/json/getPoiMoreDetail'
 TicketURL = 'https://m.ctrip.com/restapi/soa2/12530/json/getProductShelf'
 
+
 data = {'fromChannel': 2,
         'index': 1,
         'count': 20,
-        'districtId': 1,
+        'districtId': 1,  # 可修改此处变更爬取城市
         'sortType': 0,
         'categoryId': 0,
         'lat': 0,
@@ -266,6 +268,7 @@ if __name__ == '__main__':
         wr.writerow(['名称', '英文名', 'id', 'poiID', '经度', '维度', '标签', '特色', '价格', '最低价格', '评价分数',
                      '评论数量', '封面图片', '成人票价格', '老人票价格', '学生票价格', '儿童票价格', '建议游玩', '开放时间', '介绍', '优待政策'])
 
+    # 最大页数
     for page in range(0, 32):
         print(f'开始爬取第{page}页')
         data['index'] = page
