@@ -1,22 +1,26 @@
 import os
 import time
-
+import configparser
 from requests import post
 import csv
 import logging
 import json
+import shutil
 from bs4 import BeautifulSoup
+from comment_crawl import GetComments
 
-
-URL = 'https://m.ctrip.com/restapi/soa2/13342/json/getSightRecreationList'
-DetailURL = 'https://m.ctrip.com/restapi/soa2/18254/json/getPoiMoreDetail'
-TicketURL = 'https://m.ctrip.com/restapi/soa2/12530/json/getProductShelf'
-
+URL = 'https://m.ctrip.com/restapi/soa2/13342/json/getSightRecreationList'  # 获取景点列表数据
+DetailURL = 'https://m.ctrip.com/restapi/soa2/18254/json/getPoiMoreDetail'  # 获取景点详情数据
+TicketURL = 'https://m.ctrip.com/restapi/soa2/12530/json/getProductShelf'  # 获取票价数据
+CityURL = 'https://m.ctrip.com/restapi/soa2/13342/json/SearchSightRecreation'  # 获取城市编号
+isRestart = 0
+isCrawlComment = 0
+history = set()
 
 data = {'fromChannel': 2,
         'index': 1,
         'count': 20,
-        'districtId': 1,  # 可修改此处变更爬取城市
+        'districtId': 9,  # 可修改此处变更爬取城市
         'sortType': 0,
         'categoryId': 0,
         'lat': 0,
@@ -52,16 +56,17 @@ data = {'fromChannel': 2,
 detail_data = {
     "poiId": 87211,
     "scene": "basic",
-    "head": {"cid": "09031065211914680477",
-             "ctok": "",
-             "cver": "1.0",
-             "lang": "01",
-             "sid": "8888",
-             "syscode": "09",
-             "auth": "",
-             "xsid": "",
-             "extension": []
-             }
+    "head": {
+        "cid": "09031065211914680477",
+        "ctok": "",
+        "cver": "1.0",
+        "lang": "01",
+        "sid": "8888",
+        "syscode": "09",
+        "auth": "",
+        "xsid": "",
+        "extension": []
+    }
 }
 
 ticket_data = {
@@ -95,6 +100,40 @@ ticket_data = {
     'needFilter': True,
     'resourceLimit': True}
 
+city_data = {
+    'KeyWord': '',
+    'DistrictId': 1,
+    'CategoryId': 0,
+    'head': {
+        'cid': '09031065211914680477',
+        'ctok': '',
+        'cver': '1.0',
+        'lang': '01',
+        'sid': '8888',
+        'syscode': '09',
+        'auth': '',
+        'xsid': '',
+        'extension': []
+    }
+}
+
+
+def getCityID(city_name):
+    city_data['KeyWord'] = city_name
+    city_res = post(CityURL, json=city_data).json()['districtResult']
+    if len(city_res) == 0:
+        logging.error('城市名错误！无结果')
+        exit(0)
+
+    elif len(city_res) >= 1:
+        cityID = city_res[0]['districtId']
+        if len(city_res) > 1:
+            logging.warning(f'多个相似城市名结果，注意确认\n')
+            print([i["districtName"] + "-" + i["name"] for i in city_res])
+
+        print(f'目标城市：{city_res[0]["districtName"] + "-" + city_res[0]["name"]}\n')
+        return cityID
+
 
 def CalPrice(kv):
     sumSale = 0
@@ -104,7 +143,7 @@ def CalPrice(kv):
     for k, v in kv:
         try:
             avg += k / sumSale * v
-        except :
+        except:
             continue
     return avg
 
@@ -157,7 +196,6 @@ def GetTicketPrice(spotid, poiId):
                                 et = 1
                             overall.append((sales, sub['subTicketGroupInfo']['priceInfo']['price']))
 
-
     if tt == 0:
         for i in shelfGroup:
             ticketGroups = i.get('ticketGroups')
@@ -171,7 +209,7 @@ def GetTicketPrice(spotid, poiId):
                     if subTickets:
                         for sub in subTickets:
                             if '票' not in sub['subTicketGroupInfo']['name'] + sub['subTicketGroupInfo'].get('subName',
-                                                                                                            '')\
+                                                                                                            '') \
                                     or sub['subTicketGroupInfo']['priceInfo']['price'] > 300:
                                 continue
 
@@ -211,6 +249,7 @@ def GetTicketPrice(spotid, poiId):
 
     ticket_res.close()
     return [crp, lrp, xsp, etp]
+
 
 def GetDetail(poiId):
     ddata = detail_data.copy()
@@ -262,14 +301,54 @@ def GetDetail(poiId):
 if __name__ == '__main__':
     if not os.path.exists('data/'):
         os.mkdir('data')
+    if not os.path.exists('data/comments'):
+        os.mkdir('data/comments')
 
-    with open('data/pois.csv', 'a', encoding='utf-8') as f:
-        wr = csv.writer(f)
+    conf = configparser.ConfigParser()
+    conf.read('config.ini', encoding="utf-8")
+
+    try:
+        city = conf.get('poi', 'city')
+    except:
+        city = '北京'
+
+    try:
+        isRestart = int(conf.get('poi', 'isRestart'))
+        isCrawlComment = int(conf.get('poi', 'isCrawlComment'))
+        shutil.copyfile('data/pois.csv', 'data/back.csv')  # 写前备份
+    except:
+        pass
+
+    data['districtId'] = getCityID(city)    # 获取城市编号
+
+    if isRestart == 1:
+        try:
+            with open('data/pois.csv', 'r', encoding='utf-8') as rf:
+                rd = csv.reader(rf)
+                cnt = 0
+                for r in rd:
+                    cnt += 1
+                    if cnt == 1:
+                        continue
+                    history.add(int(r[2]))
+
+            f = open('data/pois.csv', 'a', encoding='utf-8')
+
+        except FileNotFoundError:
+            logging.error('无法续写，文件不存在')
+            isRestart = 1
+            f = open('data/pois.csv', 'w', encoding='utf-8')
+
+    else:
+        f = open('data/pois.csv', 'w', encoding='utf-8')
+
+    wr = csv.writer(f)
+    if isRestart == 0:
         wr.writerow(['名称', '英文名', 'id', 'poiID', '经度', '维度', '标签', '特色', '价格', '最低价格', '评价分数',
                      '评论数量', '封面图片', '成人票价格', '老人票价格', '学生票价格', '儿童票价格', '建议游玩', '开放时间', '介绍', '优待政策'])
 
     # 最大页数
-    for page in range(0, 32):
+    for page in range(1, 5000):
         print(f'开始爬取第{page}页')
         data['index'] = page
         poiListRes = post(URL, json=data)
@@ -277,13 +356,20 @@ if __name__ == '__main__':
             print(poiListRes.json())
             break
         poiList = poiListRes.json()['result']['sightRecreationList']
+        if len(poiList) == 0:  # 如果此页没有数据，说明爬取结束或者出错了
+            break
         for poi in poiList:
             row = []
-            print(poi.get('name'))
+            ID = poi.get('id', '')
+            print(poi.get('name'), end='')
+            if isRestart and int(ID) in history:
+                print(' 已存在')
+                continue
+            print()
             row.append(poi.get('name', ''))  # 名称
             row.append(poi.get('eName', ''))  # 英文名
-            ID = poi.get('id', '')
             row.append(ID)  # id
+
             poiID = poi.get('poiId', '')
             row.append(poiID)  # poiId
             row.append(poi['coordInfo']['gDLat'])  # 经度
@@ -325,9 +411,18 @@ if __name__ == '__main__':
                 if yhbj == 0 and free == 1:
                     row[-5] = 0  # 儿童票免费
 
-            with open('data/pois.csv', 'a', encoding='utf-8') as f:
-                wr = csv.writer(f)
-                wr.writerow(row)
+            wr.writerow(row)
+
             time.sleep(1)
 
+            if isCrawlComment == 1: # 爬取评论
+                try:
+                    print(f'开始爬取{poi.get("name", "")}评论')
+                    GetComments(ID, commentCount)
+                except Exception as e:
+                    print(e)
+                    logging.error(f'爬取{poi.get("name", "")}评论错误！')
+
         time.sleep(2)
+
+    f.close()
