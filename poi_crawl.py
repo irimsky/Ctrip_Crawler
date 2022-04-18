@@ -182,6 +182,9 @@ def GetTicketPrice(spotid, poiId):
                     subTickets = j.get('subTicketGroups')
                     if subTickets:
                         for sub in subTickets:
+                            if not sub.get('subTicketGroupInfo') or not sub['subTicketGroupInfo'].get('priceInfo') or not sub['subTicketGroupInfo']['priceInfo'].get('price'):
+                                continue
+                                
                             if '成人' in sub['subTicketGroupInfo']['name'] + sub['subTicketGroupInfo'].get('subName', ''):
                                 chengr.append((sales, sub['subTicketGroupInfo']['priceInfo']['price']))
                                 cr = 1
@@ -208,6 +211,9 @@ def GetTicketPrice(spotid, poiId):
                     subTickets = j.get('subTicketGroups')
                     if subTickets:
                         for sub in subTickets:
+                            if not sub.get('subTicketGroupInfo') or not sub['subTicketGroupInfo'].get('priceInfo') or not sub['subTicketGroupInfo']['priceInfo'].get('price'):
+                                continue
+                                
                             if '票' not in sub['subTicketGroupInfo']['name'] + sub['subTicketGroupInfo'].get('subName',
                                                                                                             '') \
                                     or sub['subTicketGroupInfo']['priceInfo']['price'] > 300:
